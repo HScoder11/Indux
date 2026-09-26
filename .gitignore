@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.env
+
+# Large data - download with the steps in README, don't commit
+data/benchmark/**/*
+!data/benchmark/**/.gitkeep
+data/sim/*
+!data/sim/.gitkeep
+models/*
+!models/.gitkeep
+
+node_modules/
+dashboard/dist/
