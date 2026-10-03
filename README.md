@@ -1,7 +1,7 @@
 # Indux: predictive maintenance for small motors
 
 ```
-[Simulator / Dataset replay / (later) ESP32] → ml/features.py → 3 models → FastAPI WebSocket → React dashboard → Claude report
+[Simulator / Dataset replay / (later) ESP32] → ml/features.py → 3 models → FastAPI WebSocket → Next.js dashboard → Claude report
 ```
 
 All data sources share one JSON-lines format: see [docs/data_contract.md](docs/data_contract.md).
@@ -66,19 +66,30 @@ The AI report uses Claude (`ANTHROPIC_API_KEY`) or Google Gemini (`GEMINI_API_KE
 
 The health gauge shows `calibrating: true` for the first ~26 s while the motor's normal is learned, and again after a speed change of more than 10%.
 
-## Dashboard
+## Dashboard (Next.js, `web/`)
 
-Needs Node.js 18+ (https://nodejs.org).
+Needs Node.js 18.18+ (https://nodejs.org).
 
 ```bash
-cd dashboard
+cd web
 npm install          # once
-npm run dev          # http://localhost:5173 - live-reloading, talks to the backend on :8000
-npm run build        # makes dashboard/dist - then `python -m backend` serves it at http://localhost:8000
+npm run dev          # http://localhost:3000 - live-reloading, talks to the backend on :8000
+npm run build        # makes web/out - then `python -m backend` serves it at http://localhost:8000
 ```
 
 Demo day: build once, then only `python -m backend` is needed; open http://localhost:8000.
-The Benchmarks tab shows the images in `docs/figures/`.
+
+| Page | What you can do |
+|---|---|
+| Live (`/`) | Health, status, AI probabilities, "why", FFT (zoom 0–400 Hz), trends, waveform. **Pause / rewind**: drag the timeline or click any trend chart to see every panel at that moment. Inject faults, drag severity live, **Autopilot** runs every fault in turn and times detection. |
+| Alerts (`/alerts`) | Filter by fault type / state / text, click a row for details, AI report and **Replay this event** (plays the black-box recording back through the pipeline). |
+| Reports (`/reports`) | Generate English / Hindi reports, browse the library, download PDF / TXT / MD. |
+| Benchmarks (`/benchmarks`) | Result tiles and figures from `docs/figures/` - click to enlarge, ← → to flip. |
+
+Keyboard: `1`–`6` inject faults (simulator), `Space` pause/resume, `←` `→` step, `L` live, `G` then `A`/`R`/`B`/`L` switch page, `?` help.
+Toasts pop up when an alert starts, clears, or its AI report is ready; the 🔔 button adds a beep.
+
+The older Vite dashboard is still in `dashboard/`; the backend serves `web/out` first and falls back to `dashboard/dist`.
 
 ## Alerts: automatic report, email, saved data
 

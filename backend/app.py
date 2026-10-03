@@ -269,14 +269,15 @@ FIG_DIR = ROOT / "docs" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/figures", StaticFiles(directory=FIG_DIR), name="figures")
 
-# After `npm run build` in dashboard/, the backend serves the whole dashboard at
-# http://localhost:8000 - one command on demo day. Mounted last so /api and /ws win.
-DIST = ROOT / "dashboard" / "dist"
-if DIST.exists():
+# After `npm run build` in web/ (Next.js) - or the older dashboard/ - the backend
+# serves the whole frontend at http://localhost:8000: one command on demo day.
+# Mounted last so /api and /ws win.
+DIST = next((d for d in (ROOT / "web" / "out", ROOT / "dashboard" / "dist") if d.exists()), None)
+if DIST:
     app.mount("/", StaticFiles(directory=DIST, html=True), name="dashboard")
 else:
     @app.get("/")
     def root():
         return {"indux": "backend running", "docs": "/docs",
-                "dashboard": "run `npm run dev` in dashboard/ (http://localhost:5173) "
+                "dashboard": "run `npm run dev` in web/ (http://localhost:3000) "
                              "or `npm run build` to serve it here"}

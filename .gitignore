@@ -22,3 +22,7 @@ data/events/
 data/recordings/
 data/soak_results.csv
 Claude outputs/
+
+# Next.js
+web/.next/
+web/out/
