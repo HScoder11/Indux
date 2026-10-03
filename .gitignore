@@ -15,3 +15,10 @@ models/*
 
 node_modules/
 dashboard/dist/
+
+# Runtime output - local only
+data/indux.db*
+data/events/
+data/recordings/
+data/soak_results.csv
+Claude outputs/
