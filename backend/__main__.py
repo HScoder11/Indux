@@ -20,4 +20,8 @@ if args.file:
 if args.port:
     os.environ["INDUX_PORT"] = args.port
 
+# Importing SciPy and the models takes ~10-40 s on Windows (longest on the first run), with no
+# output - say so, or it looks frozen and gets Ctrl+C'd.
+print("[indux] starting... loading SciPy and the ML models, this can take up to ~40 s. "
+      "Wait for 'Application startup complete'.", flush=True)
 uvicorn.run("backend.app:app", host=args.host, port=args.http_port, log_level="info")

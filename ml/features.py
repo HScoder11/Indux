@@ -121,9 +121,10 @@ def extract(window, fs, rpm, current=None, voltage=None, temp=None, prev_temp=No
     feats["rms"] = rms
     feats["peak"] = peak
     feats["p2p"] = float(x.max() - x.min())
-    feats["std"] = float(x.std())
-    feats["kurtosis"] = float(stats.kurtosis(x, fisher=False))  # Gaussian noise = 3
-    feats["skewness"] = float(stats.skew(x))
+    x_std = float(x.std())
+    feats["std"] = x_std
+    feats["kurtosis"] = float(stats.kurtosis(x, fisher=False)) if x_std > 1e-9 else 3.0
+    feats["skewness"] = float(stats.skew(x)) if x_std > 1e-9 else 0.0
     feats["crest"] = peak / (rms + _EPS)
 
     # ---- frequency domain
@@ -142,11 +143,13 @@ def extract(window, fs, rpm, current=None, voltage=None, temp=None, prev_temp=No
     # ---- envelope spectrum (bearing faults)
     lo, hi = env_band if env_band is not None else (0.25 * nyq, 0.9 * nyq)
     hi = min(hi, 0.99 * nyq)
+    lo = max(1.0, min(lo, hi - 10.0))
     sos = signal.butter(4, [lo, hi], btype="bandpass", fs=fs, output="sos")
     env = np.abs(signal.hilbert(signal.sosfiltfilt(sos, xc)))
     ef, ea = amplitude_spectrum(env, fs)
     top = 3.0 * max(bearing.values(), default=1.0) * f1
-    floor = float(np.median(ea[(ef > 1.0) & (ef <= max(top, 10.0))]))
+    band_mask = (ef > 1.0) & (ef <= max(top, 10.0))
+    floor = float(np.median(ea[band_mask])) if band_mask.any() else (float(np.median(ea)) if len(ea) > 0 else 0.0)
     for name, ratio in bearing.items():
         v = peak_near(ef, ea, ratio * f1, tol)
         feats[f"env_{name}"] = v
@@ -190,10 +193,17 @@ class StreamFeaturizer:
         self._rpm.append(rec["rpm"])
         if rec.get("current") is not None:
             self._current.append(rec["current"])
+        else:
+            self._current.clear()
+
         temp = rec.get("temp")
         prev_temp = self._temp[0] if self._temp else None
         if temp is not None:
             self._temp.append(temp)
+        else:
+            self._temp.clear()
+            prev_temp = None
+
         return extract(rec["vib"], rec["fs"], rec["rpm"],
                        current=list(self._current) or None, voltage=rec.get("voltage"),
                        temp=temp, prev_temp=prev_temp, rpm_history=list(self._rpm),

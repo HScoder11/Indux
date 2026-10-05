@@ -117,8 +117,14 @@ class LivePredictor:
         if len(self.trend) < TTF_LOOKBACK:
             return None
         t = np.array([p[0] for p in self.trend])
+        dt = t - t[0]
+        if len(np.unique(dt)) < 2 or (dt[-1] - dt[0]) <= 0:
+            return None
         h = np.array([p[1] for p in self.trend])
-        slope = np.polyfit(t - t[0], h, 1)[0]          # health points per second
+        try:
+            slope = np.polyfit(dt, h, 1)[0]          # health points per second
+        except Exception:
+            return None
         if slope >= -0.05 or h[-1] >= 80:
             return None
         return round(float(h[-1] / -slope), 1)          # rough seconds until health hits 0
@@ -133,8 +139,8 @@ class LivePredictor:
         cond = classes[int(np.argmax(probs))]
         conf = float(np.max(probs))
 
-        # Relearn normal if the operator changed speed a lot
-        if self.base and abs(f["rpm"] - self.base[2]) / self.base[2] > RECALIB_RPM_CHANGE:
+        # Relearn normal if the operator changed speed a lot (guard 0 RPM)
+        if self.base and self.base[2] > 0 and abs(f["rpm"] - self.base[2]) / self.base[2] > RECALIB_RPM_CHANGE:
             self.calib, self.base = [], None
             self.health_hist.clear()
             self.trend.clear()
@@ -142,9 +148,12 @@ class LivePredictor:
         # Models 2 + 3: distance from this motor's normal -> health
         z, health, h_raw = None, None, None
         if self.base is None:
-            self.calib.append(f)
-            if len(self.calib) >= CALIB_WINDOWS:
-                self._learn_baseline()
+            # Baseline guard: only learn from healthy or low-confidence windows,
+            # never bake a high-confidence fault into the normal baseline
+            if cond == "healthy" or conf < 0.70:
+                self.calib.append(f)
+                if len(self.calib) >= CALIB_WINDOWS:
+                    self._learn_baseline()
         else:
             z = self._z(f)
             h_raw = self._health(self._distance(z))

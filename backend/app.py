@@ -88,7 +88,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Indux backend", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+cors_env = os.getenv("CORS_ORIGINS", "*")
+allowed_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=allowed_origins, allow_methods=["*"], allow_headers=["*"])
 
 
 def E() -> Engine:
@@ -111,6 +113,17 @@ class FaultReq(BaseModel):
 
 class ReportReq(BaseModel):
     lang: str = "en"
+
+
+class NotifyConfigReq(BaseModel):
+    user: str
+    password: str
+    to: str
+    host: str | None = None
+    port: int | None = None
+    provider: str = "gmail"
+    test_now: bool = True
+    save_env: bool = True
 
 
 @app.get("/api/status")
@@ -218,8 +231,12 @@ def events():
 
 @app.get("/api/events/{name}")
 def event_file(name: str):
-    path = (EVENT_DIR / name).resolve()
-    if path.parent != EVENT_DIR.resolve() or not path.exists() or path.suffix != ".csv":
+    try:
+        path = (EVENT_DIR / name).resolve()
+        path.relative_to(EVENT_DIR.resolve())
+    except (ValueError, RuntimeError):
+        raise HTTPException(404, "event recording not found")
+    if not path.is_file() or path.suffix != ".csv":
         raise HTTPException(404, "event recording not found")
     return Response(path.read_bytes(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{path.name}"'})
@@ -232,16 +249,61 @@ def notify_status():
     return st
 
 
+@app.post("/api/notify/config")
+async def notify_config(req: NotifyConfigReq):
+    if not req.user.strip():
+        raise HTTPException(400, "Sender email is required.")
+    if not req.password.strip():
+        raise HTTPException(400, "Password / App Password is required.")
+    if not req.to.strip():
+        raise HTTPException(400, "At least one recipient email address is required.")
+
+    st = notify.configure(
+        user=req.user,
+        password=req.password,
+        to=req.to,
+        host=req.host,
+        port=req.port,
+        save_env=req.save_env,
+    )
+
+    if req.test_now:
+        try:
+            await asyncio.to_thread(notify.test_connection)
+            recipients = st.get("recipients") or [req.to]
+            test_html = notify.build_test_html(sender=req.user, recipients=recipients)
+            await asyncio.to_thread(
+                notify.send,
+                subject=f"[Indux] Test email from {report.MACHINE}",
+                text="Indux email alerts are verified and working.",
+                html=test_html,
+            )
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, str(e))
+
+    st["auto_report"] = E().auto_report
+    return st
+
+
 @app.post("/api/notify/test")
 async def notify_test():
+    st = notify.status()
+    if not st.get("configured"):
+        raise HTTPException(400, "Email alerts are not configured yet.")
     try:
+        sender = st.get("user") or report.MACHINE
+        recipients = st.get("recipients") or []
+        test_html = notify.build_test_html(sender, recipients)
         await asyncio.to_thread(
-            notify.send, subject=f"[Indux] Test email from {report.MACHINE}",
+            notify.send,
+            subject=f"[Indux] Test email from {report.MACHINE}",
             text="Email alerts are working. You will get a message like this, with the AI report "
-                 "attached, whenever Indux detects a fault or anomaly.")
+                 "attached, whenever Indux detects a fault or anomaly.",
+            html=test_html,
+        )
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"{type(e).__name__}: {e}")
-    return {"ok": True, "to": notify.status()["to"]}
+    return {"ok": True, "to": st["to"]}
 
 
 # ------------------------------------------------------------------ WebSocket

@@ -5,10 +5,12 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.getenv("INDUX_DB", ROOT / "data" / "indux.db"))
+RETENTION_DAYS = float(os.getenv("INDUX_DB_RETENTION_DAYS", "14"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS readings (
@@ -21,20 +23,23 @@ CREATE TABLE IF NOT EXISTS alerts (
     ts REAL, source TEXT, condition TEXT, label TEXT, health REAL,
     confidence REAL, reasons TEXT, action TEXT, resolved_ts REAL
 );
+CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts);
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL, lang TEXT, engine TEXT, model TEXT, source TEXT,
     condition TEXT, health REAL, alert INTEGER, text TEXT, summary TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_reports_ts ON reports(ts);
 """
 
 
 class Store:
-    def __init__(self, path=DB_PATH):
+    def __init__(self, path=DB_PATH, retention_days: float = RETENTION_DAYS):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.Lock()
+        self.retention_days = retention_days
         with self.lock:
             self.db.executescript(SCHEMA)
             # upgrade databases made by older versions (adding a column twice just fails)
@@ -48,6 +53,18 @@ class Store:
                     pass
             self.db.commit()
         self._pending = 0
+        self._batches_since_prune = 0
+        if self.retention_days > 0:
+            self.prune_old_readings(self.retention_days)
+
+    def prune_old_readings(self, days: float | None = None):
+        days = self.retention_days if days is None else days
+        if days <= 0:
+            return
+        cutoff = time.time() - days * 86400
+        with self.lock:
+            self.db.execute("DELETE FROM readings WHERE ts < ?", (cutoff,))
+            self.db.commit()
 
     def add_reading(self, m: dict):
         with self.lock:
@@ -60,6 +77,10 @@ class Store:
             if self._pending >= 20:          # commit in small batches
                 self.db.commit()
                 self._pending = 0
+                self._batches_since_prune += 1
+                if self._batches_since_prune >= 500 and self.retention_days > 0:
+                    self.prune_old_readings(self.retention_days)
+                    self._batches_since_prune = 0
 
     def open_alert(self, m: dict, action: str) -> int:
         with self.lock:
@@ -87,7 +108,7 @@ class Store:
         return out
 
     def update_alert(self, alert_id: int, **fields):
-        allowed = {"report_id", "email_status", "event_file"}
+        allowed = {"report_id", "email_status", "event_file", "condition", "label", "action"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return

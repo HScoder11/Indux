@@ -78,3 +78,22 @@ def test_stream_featurizer_history():
         out = fz({**rec, "temp": 30.0 + i, "current": 1.0 + 0.1 * i})
     assert out["temp_delta"] == pytest.approx(3.0)  # 33 now vs 30 three windows back
     assert out["current_mean"] == pytest.approx(1.2)
+
+
+def test_flatline_no_nans():
+    zeros = np.zeros(2048)
+    f = extract(zeros, 3200, rpm=3000)
+    assert not np.isnan(f["kurtosis"])
+    assert not np.isnan(f["skewness"])
+    assert f["rms"] == 0.0
+    assert f["std"] == 0.0
+
+
+def test_stream_featurizer_drops_stale_data():
+    fz = StreamFeaturizer(history=3)
+    rec = {"rpm": 3000, "fs": 3200, "current": 1.0, "temp": 30.0, "vib": sine(50, 3200)}
+    fz(rec)
+    rec_drop = {"rpm": 3000, "fs": 3200, "vib": sine(50, 3200)}
+    out = fz(rec_drop)
+    assert np.isnan(out["current_mean"])
+    assert np.isnan(out["temp"])

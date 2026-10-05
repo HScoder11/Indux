@@ -7,7 +7,8 @@ export default function Timeline() {
   const { frames, cursor, live, pause, goLive, inspect, latest } = useLive();
   if (!frames.length) return null;
 
-  const idx = live ? frames.length - 1 : Math.max(0, frames.findIndex((f) => f.ts === cursor));
+  const foundIdx = cursor == null ? -1 : frames.findIndex((f) => f.ts === cursor);
+  const idx = live ? frames.length - 1 : (foundIdx >= 0 ? foundIdx : 0);
   const shown = frames[idx];
   const step = (d) => {
     const j = Math.min(frames.length - 1, Math.max(0, idx + d));

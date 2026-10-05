@@ -49,7 +49,7 @@ class BlackBox:
             for ev in done:
                 self._pending.remove(ev)
         for ev in done:
-            self._write(ev)
+            threading.Thread(target=self._write, args=(ev,), name="indux-blackbox", daemon=True).start()
 
     def trigger(self, name: str, on_saved=None):
         """Start an event file: everything in memory now + the next after_s seconds."""

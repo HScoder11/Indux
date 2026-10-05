@@ -20,9 +20,11 @@ from backend.sources import Source, SourceError, SimSource
 from backend.store import Store
 from backend.recorder import BlackBox, RawRecorder
 from backend.notify import AlertMailer
-from backend import report as report_mod
+from backend import notify, report as report_mod
 
 WAVE_POINTS = 256                 # downsampled waveform sent to the dashboard
+SWITCH_READINGS = 3               # a different known fault must hold this long to count as a new alert
+CLEAR_READINGS = 8                # ~5 s of normal readings before an alert is closed
 HISTORY_MAX = 6000                # ~1 hour of windows kept in memory
 
 ACTIONS = {
@@ -46,6 +48,9 @@ class Engine:
         self.windows = 0
         self._alert_id = None
         self._alert_cond = None
+        self._alert_m = None              # latest reading of the open alert (its label can be upgraded)
+        self._pending_cond, self._pending_n = None, 0
+        self._clear_n = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._clients: set[asyncio.Queue] = set()
@@ -145,6 +150,8 @@ class Engine:
         self.raw.add(rec)
         vib = rec["vib"]
         step = max(1, len(vib) // WAVE_POINTS)
+        m["fs"] = rec.get("fs", 3200)
+        m["vib_len"] = len(vib)
         m["wave"] = [round(float(v), 4) for v in vib[::step][:WAVE_POINTS]]
         m["status"] = "live"
         m["source_info"] = self.source.describe()
@@ -159,19 +166,59 @@ class Engine:
         return m
 
     def _track_alert(self, m):
-        if m["alert"] and m["alert_condition"] != self._alert_cond:
+        """One continuous fault = one alert (one recording, one report, one email).
+
+        While an alert is open the classifier's label often flickers between the known fault and
+        "anomaly"; that stays the same alert. "anomaly" that becomes recognisable is relabelled in
+        place. Only a *different known fault* that holds for SWITCH_READINGS opens a new alert, and an
+        alert closes only after CLEAR_READINGS normal readings (no open/close flicker at the end).
+        """
+        cond = m["alert_condition"] if m["alert"] else None
+        if self._alert_id is None:
+            if cond:
+                self._open_alert(m)
+            return
+        if not cond:
+            self._pending_cond, self._pending_n = None, 0
+            self._clear_n += 1
+            if self._clear_n >= CLEAR_READINGS:
+                self._close_alert(m["ts"])
+            return
+        self._clear_n = 0
+        if cond == self._alert_cond:
+            self._pending_cond, self._pending_n = None, 0
+            self._alert_m = m
+            return
+        if cond == "anomaly":                 # a known fault briefly looks "unknown" (or the motor is still
+            self._pending_cond, self._pending_n = None, 0   # recovering, e.g. cooling): same incident
+            return
+        if self._alert_cond == "anomaly":     # the classifier now recognises it: upgrade this alert
+            self._relabel(m)
+            return
+        self._pending_n = self._pending_n + 1 if cond == self._pending_cond else 1
+        self._pending_cond = cond
+        if self._pending_n >= SWITCH_READINGS:   # really a different fault now
             self._close_alert(m["ts"])
-            action = ACTIONS.get(m["alert_condition"], ACTIONS["anomaly"])
-            self._alert_id = self.store.open_alert(m, action)
-            self._alert_cond = m["alert_condition"]
-            self._on_new_alert(self._alert_id, m, action)
-        elif not m["alert"] and self._alert_id is not None:
-            self._close_alert(m["ts"])
+            self._open_alert(m)
+
+    def _open_alert(self, m):
+        action = ACTIONS.get(m["alert_condition"], ACTIONS["anomaly"])
+        self._alert_id = self.store.open_alert(m, action)
+        self._alert_cond, self._alert_m = m["alert_condition"], m
+        self._pending_cond, self._pending_n, self._clear_n = None, 0, 0
+        self._on_new_alert(self._alert_id, m, action)
+
+    def _relabel(self, m):
+        action = ACTIONS.get(m["alert_condition"], ACTIONS["anomaly"])
+        self.store.update_alert(self._alert_id, condition=m["alert_condition"], label=m["alert_label"], action=action)
+        self._alert_cond, self._alert_m = m["alert_condition"], m
+        self._pending_cond, self._pending_n = None, 0
 
     def _close_alert(self, ts):
         if self._alert_id is not None:
             self.store.close_alert(self._alert_id, ts)
-        self._alert_id, self._alert_cond = None, None
+        self._alert_id, self._alert_cond, self._alert_m = None, None, None
+        self._pending_cond, self._pending_n, self._clear_n = None, 0, 0
 
     # ------------------------------------------------------------ alert automation
     def _on_new_alert(self, alert_id, m, action):
@@ -185,6 +232,10 @@ class Engine:
 
     def _alert_job(self, alert_id, m, action):
         time.sleep(float(os.getenv("AUTO_REPORT_DELAY_S", "3")))    # let a few more readings arrive
+        cur = self._alert_m
+        if self._alert_id == alert_id and cur is not None:          # still open: describe it as it is now
+            m = dict(cur)                                            # (e.g. "anomaly" upgraded to "unbalance")
+            action = ACTIONS.get(m["alert_condition"], ACTIONS["anomaly"])
         lang = os.getenv("ALERT_REPORT_LANG", "en")
         try:
             rep = report_mod.generate(self, lang)
@@ -205,23 +256,30 @@ class Engine:
         text = (f"Indux detected: {m['alert_label']} (confidence {m['confidence']:.0%})\n"
                 f"Machine: {report_mod.MACHINE}\nTime: {time.strftime('%d %b %Y %H:%M:%S', time.localtime(m['ts']))}\n"
                 f"Health score: {m.get('health')}\nSource: {m.get('source')}\n\nTop signals:\n{reasons}\n\n"
-                f"Recommended action: {action}\n\n----- Report -----\n{rep['report']}\n")
+                f"Recommended action: {action}\n\n----- Report -----\n{rep.get('report') or rep.get('text')}\n")
         attachments = []
         if r:
             attachments.append((report_mod.filename(r, "html"), report_mod.to_html(r).encode("utf-8"), "text/html"))
         rows = self.store.export_readings(since_ts=m["ts"] - 180)
         if rows:
             attachments.append((f"readings_alert_{alert_id}.csv", readings_csv(rows).encode("utf-8"), "text/csv"))
+        alert_html = notify.build_alert_html(m, action, rep.get("report") or rep.get("text") or "")
         self.mailer.send_async(lambda st: self.store.update_alert(alert_id, email_status=st),
+                               condition=m["alert_condition"],
                                subject=subject, text=text,
-                               html=report_mod.to_html(r) if r else None, attachments=attachments)
+                               html=alert_html, attachments=attachments)
 
     # ------------------------------------------------------------ queries
     def status_dict(self) -> dict:
-        last = self.last or {}
+        with self._lock:
+            last = self.last or {}
+            status = self.status
+            error = self.error
+            desc = self.source.describe()
+            windows = self.windows
         return {
-            "status": self.status, "error": self.error, "source": self.source.describe(),
-            "windows": self.windows, "clients": len(self._clients),
+            "status": status, "error": error, "source": desc,
+            "windows": windows, "clients": len(self._clients),
             "calibrating": last.get("calibrating"), "health": last.get("health"),
             "condition": last.get("condition"), "alert": last.get("alert"),
         }

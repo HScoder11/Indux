@@ -96,9 +96,15 @@ class ReplaySource(_Paced):
         super().__init__(speed)
         self.path = Path(path)
         if not self.path.is_absolute():
-            # "events/x.csv" -> data/events (alert black-box files); anything else -> data/sim
-            self.path = (DATA_DIR / self.path) if str(path).replace("\\", "/").startswith("events/") \
-                else SIM_DIR / self.path
+            norm_str = str(path).replace("\\", "/")
+            if norm_str.startswith("events/"):
+                self.path = DATA_DIR / norm_str
+            elif (SIM_DIR / path).exists():
+                self.path = SIM_DIR / path
+            elif (DATA_DIR / "events" / Path(path).name).exists():
+                self.path = DATA_DIR / "events" / Path(path).name
+            else:
+                self.path = SIM_DIR / path
         try:
             self.path.resolve().relative_to(DATA_DIR.resolve())
         except ValueError:

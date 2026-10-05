@@ -84,16 +84,19 @@ export function FftChart({ last }) {
 
 /* ---------------- waveform ---------------- */
 export function WaveChart({ last }) {
+  const fs = last?.fs || 3200;
+  const nSamples = last?.vib_len || 2048;
+  const winSec = nSamples / fs;
   const data = useMemo(() => {
-    if (!last?.wave) return [];
-    const dtMs = ((2048 / 3200) * 1000) / last.wave.length;   // wave = the 0.64 s window, downsampled
+    if (!last?.wave?.length) return [];
+    const dtMs = (winSec * 1000) / last.wave.length;
     return last.wave.map((v, i) => ({ ms: Math.round(i * dtMs), v }));
-  }, [last]);
+  }, [last, winSec]);
   return (
     <section className="card">
       <div className="chart-title">
         <h2>Vibration waveform</h2>
-        <span className="sub">0.64 s window{last ? ` · ${clock(last.ts)}` : ""}</span>
+        <span className="sub">{winSec.toFixed(2)} s window{last ? ` · ${clock(last.ts)}` : ""}</span>
       </div>
       <div style={{ height: 150 }}>
         <ResponsiveContainer width="100%" height="100%">

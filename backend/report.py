@@ -17,8 +17,8 @@ import time
 import urllib.error
 import urllib.request
 
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 CACHE_SECONDS = 60
 MACHINE = os.getenv("INDUX_MACHINE_NAME", "BLDC Motor #1")
@@ -139,7 +139,11 @@ def _gemini(prompt):
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "ignore")[:200]
         raise RuntimeError(f"HTTP {e.code} {detail}") from e
-    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+    candidates = data.get("candidates") or []
+    if not candidates:
+        block = data.get("promptFeedback", {}).get("blockReason") or data.get("error", {}).get("message")
+        raise RuntimeError(f"Gemini returned no candidates (reason: {block or 'unknown'})")
+    parts = candidates[0].get("content", {}).get("parts", [])
     return "".join(p.get("text", "") for p in parts if not p.get("thought")), GEMINI_MODEL
 
 
@@ -184,12 +188,13 @@ def generate(engine, lang="en") -> dict:
     elif notes:
         result["note"] = "fell back after " + "; ".join(notes)
 
-    result.update(lang=lang, generated_at=time.time(), summary=s, cached=False)
+    now_ts = time.time()
+    result.update(lang=lang, generated_at=now_ts, ts=now_ts, text=result["report"], summary=s, cached=False)
     try:
         result["id"] = engine.store.save_report(result)       # keep every fresh report
     except Exception:  # noqa: BLE001 - never lose the report because saving failed
         result["id"] = None
-    _cache[key] = (time.time(), result)
+    _cache[key] = (now_ts, result)
     return result
 
 
@@ -198,28 +203,36 @@ ENGINE_NAME = {"claude": "Claude", "gemini": "Gemini", "template": "Offline temp
 
 
 def _header_lines(r: dict) -> list[tuple[str, str]]:
-    when = time.strftime("%d %b %Y, %H:%M:%S", time.localtime(r["ts"]))
+    ts = r.get("ts") or r.get("generated_at") or time.time()
+    when = time.strftime("%d %b %Y, %H:%M:%S", time.localtime(ts))
     health = "-" if r.get("health") is None else f"{r['health']:.0f} / 100"
-    by = ENGINE_NAME.get(r["engine"], r["engine"]) + (f" ({r['model']})" if r.get("model") else "")
-    return [("Machine", MACHINE), ("Generated", when), ("Condition", r.get("condition") or "-"),
-            ("Health score", health), ("Data source", r.get("source") or "-"),
-            ("Language", "Hindi" if r["lang"] == "hi" else "English"), ("Written by", by),
-            ("Report ID", f"#{r['id']}")]
+    by = ENGINE_NAME.get(r.get("engine", "template"), r.get("engine", "template")) + (f" ({r['model']})" if r.get("model") else "")
+    cond = r.get("condition") or (r.get("summary", {}).get("current_condition") if isinstance(r.get("summary"), dict) else None) or "-"
+    src = r.get("source") or (r.get("summary", {}).get("data_source") if isinstance(r.get("summary"), dict) else None) or "-"
+    rid = f"#{r['id']}" if r.get("id") else "-"
+    return [("Machine", MACHINE), ("Generated", when), ("Condition", cond),
+            ("Health score", health), ("Data source", src),
+            ("Language", "Hindi" if r.get("lang") == "hi" else "English"), ("Written by", by),
+            ("Report ID", rid)]
 
 
 def filename(r: dict, ext: str) -> str:
-    stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(r["ts"]))
-    return f"indux_report_{r['id']}_{stamp}_{r['lang']}.{ext}"
+    ts = r.get("ts") or r.get("generated_at") or time.time()
+    stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(ts))
+    rid = r.get("id", "draft")
+    return f"indux_report_{rid}_{stamp}_{r.get('lang', 'en')}.{ext}"
 
 
 def to_text(r: dict) -> str:
     head = "\n".join(f"{k}: {v}" for k, v in _header_lines(r))
-    return f"INDUX MAINTENANCE REPORT\n{'=' * 40}\n{head}\n{'=' * 40}\n\n{r['text'].strip()}\n"
+    body = (r.get("text") or r.get("report") or "").strip()
+    return f"INDUX MAINTENANCE REPORT\n{'=' * 40}\n{head}\n{'=' * 40}\n\n{body}\n"
 
 
 def to_markdown(r: dict) -> str:
     head = "\n".join(f"| {k} | {v} |" for k, v in _header_lines(r))
-    return f"# Indux maintenance report\n\n| | |\n|---|---|\n{head}\n\n{r['text'].strip()}\n"
+    body = (r.get("text") or r.get("report") or "").strip()
+    return f"# Indux maintenance report\n\n| | |\n|---|---|\n{head}\n\n{body}\n"
 
 
 def _md_to_html(text: str) -> str:
@@ -260,9 +273,11 @@ def _md_to_html(text: str) -> str:
 def to_html(r: dict) -> str:
     import html
     rows = "".join(f"<tr><th>{html.escape(k)}</th><td>{html.escape(str(v))}</td></tr>" for k, v in _header_lines(r))
+    body = r.get("text") or r.get("report") or ""
+    rid = r.get("id", "draft")
     return f"""<!doctype html>
-<html lang="{'hi' if r['lang'] == 'hi' else 'en'}"><head><meta charset="utf-8">
-<title>Indux report #{r['id']}</title>
+<html lang="{'hi' if r.get('lang') == 'hi' else 'en'}"><head><meta charset="utf-8">
+<title>Indux report #{rid}</title>
 <style>
  body {{ font-family: "Segoe UI", "Nirmala UI", "Noto Sans Devanagari", system-ui, sans-serif;
         max-width: 760px; margin: 32px auto; padding: 0 20px; color: #111; line-height: 1.5; }}
@@ -278,6 +293,6 @@ def to_html(r: dict) -> str:
 <h1>Maintenance report</h1><div class="brand">Indux predictive maintenance</div>
 <div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
 <table>{rows}</table>
-{_md_to_html(r['text'])}
+{_md_to_html(body)}
 <div class="foot">Generated automatically from sensor data. Verify on the machine before replacing parts.</div>
 </body></html>"""

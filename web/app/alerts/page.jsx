@@ -80,11 +80,13 @@ function Drawer({ alert, onClose }) {
           </>
         )}
         <div className="row" style={{ marginTop: 12 }}>
-          {alert.event_file && (
+          {alert.event_file ? (
             <>
               <button className="btn primary" onClick={replay} disabled={busy}>{busy ? "Starting…" : "▶ Replay this event"}</button>
               <a className="btn" href={`/api/${alert.event_file}`} download>Sensor data CSV</a>
             </>
+          ) : (
+            <span className="sub">Black-box recording is being saved…</span>
           )}
         </div>
         <h3 className="sec">AI report</h3>
@@ -97,6 +99,304 @@ function Drawer({ alert, onClose }) {
         )}
       </aside>
     </div>
+  );
+}
+
+function GmailConfigModal({ current, onClose, onSaved }) {
+  const toast = useToast();
+  const [provider, setProvider] = useState(current?.provider === "smtp" ? "smtp" : "gmail");
+  const [user, setUser] = useState("");
+  const [password, setPassword] = useState("");
+  const [to, setTo] = useState(current?.recipients?.join(", ") || current?.to?.join(", ") || "");
+  const [host, setHost] = useState(current?.host || "smtp.gmail.com");
+  const [port, setPort] = useState(current?.port || 587);
+  const [testNow, setTestNow] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleProviderChange = (p) => {
+    setProvider(p);
+    if (p === "gmail") {
+      setHost("smtp.gmail.com");
+      setPort(587);
+    }
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+
+    try {
+      const payload = {
+        provider,
+        user: user.trim(),
+        password: password.trim(),
+        to: to.trim(),
+        host: provider === "gmail" ? "smtp.gmail.com" : host.trim(),
+        port: Number(port) || 587,
+        test_now: testNow,
+        save_env: true,
+      };
+
+      const res = await api("/api/notify/config", payload);
+      toast({
+        zone: "green",
+        title: "Alerts Configured",
+        body: testNow ? "Gmail connection verified and test message sent!" : "Settings saved successfully."
+      });
+      onSaved(res);
+    } catch (err) {
+      setError(err.message || "Failed to configure email alerts.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose} style={{ zIndex: 100 }}>
+      <div
+        className="card dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Configure Gmail Alerts"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(560px, 95vw)" }}
+      >
+        <div className="chart-title" style={{ marginBottom: 12 }}>
+          <h2>Configure Email &amp; Gmail Alerts</h2>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        <form onSubmit={handleSave}>
+          <div style={{ marginBottom: 16 }}>
+            <label className="sub" style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>Email Service</label>
+            <div className="seg" role="group">
+              <button
+                type="button"
+                aria-pressed={provider === "gmail"}
+                onClick={() => handleProviderChange("gmail")}
+              >
+                Gmail (Recommended)
+              </button>
+              <button
+                type="button"
+                aria-pressed={provider === "smtp"}
+                onClick={() => handleProviderChange("smtp")}
+              >
+                Custom SMTP
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              {provider === "gmail" ? "Your Gmail Address" : "SMTP Username / Email"}
+            </label>
+            <input
+              type="email"
+              required
+              placeholder={provider === "gmail" ? "maintenance.team@gmail.com" : "alerts@company.com"}
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--axis)", background: "var(--surface)", color: "var(--ink)" }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              {provider === "gmail" ? "Google 16-Character App Password" : "SMTP Password"}
+            </label>
+            <input
+              type="password"
+              required
+              placeholder={provider === "gmail" ? "abcd efgh ijkl mnop" : "••••••••"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--axis)", background: "var(--surface)", color: "var(--ink)" }}
+            />
+            {provider === "gmail" && (
+              <div className="hint" style={{ marginTop: 6, lineHeight: 1.45 }}>
+                Google requires a 16-character <strong>App Password</strong>. (Normal Gmail passwords will be rejected by Google SMTP).
+                <br />
+                <a
+                  href="https://myaccount.google.com/apppasswords"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--accent)", textDecoration: "underline", display: "inline-block", marginTop: 2 }}
+                >
+                  Generate Google App Password ↗
+                </a>
+                <span style={{ marginLeft: 6, color: "var(--muted)" }}>(Spaces are removed automatically)</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              Alert Recipients (To)
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="operator@plant.com, engineer@plant.com"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--axis)", background: "var(--surface)", color: "var(--ink)" }}
+            />
+            <div className="hint">Comma-separated email addresses that will receive alerts.</div>
+          </div>
+
+          {provider === "smtp" && (
+            <div className="row" style={{ gap: 12, marginBottom: 14 }}>
+              <div style={{ flex: 2 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>SMTP Host</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="smtp.example.com"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--axis)", background: "var(--surface)", color: "var(--ink)" }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Port</label>
+                <input
+                  type="number"
+                  required
+                  value={port}
+                  onChange={(e) => setPort(e.target.value)}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--axis)", background: "var(--surface)", color: "var(--ink)" }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14 }}>
+              <input
+                type="checkbox"
+                checked={testNow}
+                onChange={(e) => setTestNow(e.target.checked)}
+              />
+              Send a test email now to verify connection &amp; delivery
+            </label>
+          </div>
+
+          {error && (
+            <div
+              style={{
+                background: "rgba(239, 68, 68, 0.1)",
+                border: "1px solid var(--critical)",
+                color: "var(--critical)",
+                padding: "10px 14px",
+                borderRadius: 8,
+                fontSize: 13,
+                marginBottom: 16,
+                lineHeight: 1.4
+              }}
+            >
+              <strong>Configuration Failed:</strong> {error}
+            </div>
+          )}
+
+          <div className="row" style={{ justifyContent: "flex-end", gap: 10 }}>
+            <button type="button" className="btn" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+            <button type="submit" className="btn primary" disabled={busy}>
+              {busy ? (testNow ? "Verifying & Sending…" : "Saving…") : "Save & Verify"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EmailAlertsCard() {
+  const [notify, setNotify] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const toast = useToast();
+
+  const loadStatus = () => {
+    api("/api/notify/status").then(setNotify).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  const sendTest = async () => {
+    setTesting(true);
+    try {
+      const res = await api("/api/notify/test", {});
+      toast({
+        zone: "green",
+        title: "Test email dispatched",
+        body: `Sent to ${res.to?.join(", ") || "recipients"}. Check your inbox.`
+      });
+    } catch (e) {
+      toast({
+        zone: "red",
+        title: "Test email failed",
+        body: e.message
+      });
+    }
+    setTesting(false);
+  };
+
+  const isConfigured = notify?.configured;
+  const isGmail = notify?.provider === "gmail";
+
+  return (
+    <>
+      <section className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <h2 style={{ margin: 0 }}>Gmail &amp; Email Alerts</h2>
+              <span className="badge" style={isConfigured ? { background: "rgba(34, 197, 94, 0.15)", color: "#16a34a", borderColor: "rgba(34, 197, 94, 0.3)" } : {}}>
+                {isConfigured ? (isGmail ? "✓ Gmail Active" : "✓ SMTP Active") : "● Not Configured"}
+              </span>
+            </div>
+            <div className="sub" style={{ marginTop: 6, maxWidth: 640 }}>
+              {isConfigured ? (
+                <>
+                  Sender: <strong>{notify.user}</strong> &bull; Recipients: <strong>{notify.to?.join(", ") || "–"}</strong>
+                  {notify.cooldown_min ? ` &bull; ${notify.cooldown_min}m fault cooldown` : ""}
+                </>
+              ) : (
+                "Receive instant Gmail alerts with AI diagnostic reports and sensor CSV attachments as soon as motor anomalies or faults occur."
+              )}
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            {isConfigured && (
+              <button className="btn" onClick={sendTest} disabled={testing}>
+                {testing ? "Sending Test…" : "✉ Send Test Email"}
+              </button>
+            )}
+            <button className={`btn ${isConfigured ? "" : "primary"}`} onClick={() => setModalOpen(true)}>
+              {isConfigured ? "Edit Gmail Settings" : "⚙ Configure Gmail"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {modalOpen && (
+        <GmailConfigModal
+          current={notify}
+          onClose={() => setModalOpen(false)}
+          onSaved={(newStatus) => {
+            setNotify(newStatus);
+            setModalOpen(false);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -137,6 +437,8 @@ function AlertsInner() {
         <h1>Alerts</h1>
         <span className="sub">{rows ? `${rows.length} recorded · ${active} active` : "Loading…"}</span>
       </div>
+
+      <EmailAlertsCard />
 
       {counts.length > 0 && (
         <section className="card">
