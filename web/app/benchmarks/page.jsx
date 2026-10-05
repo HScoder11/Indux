@@ -10,22 +10,36 @@ const TILES = [
     note: "0 false alarms. Fault type named correctly 69–73% of the time." },
   { tag: "NASA IMS", value: "3.2 days", label: "Warning before failure",
     note: "Outer-race signal 7–12× higher on the failing bearing than on the others." },
-  { tag: "AI4I 2020", value: "86%", label: "Failures detected",
-    note: "Up from 70% with raw sensors, by adding 3 physics features. 0.4% false alarms." },
+  { tag: "AI4I 2020", value: "0.93", label: "PR-AUC (no-skill baseline 0.03)",
+    note: "85% of failures caught, 92% of alarms real, on an untouched test set. Threshold chosen on a separate validation set by F2. Raw sensors alone: 0.81." },
 ];
 
 const FIGS = [
+  { file: "eda_cwru.png", caption: "CWRU: what the data looks like (raw signals, RMS and kurtosis by condition and load)", tag: "Public dataset", group: "cwru" },
   { file: "cwru_compare.png", caption: "CWRU: each fault's envelope peak lands on its bearing-theory frequency", tag: "Public dataset", group: "cwru" },
   { file: "cwru_anomaly_health.png", caption: "CWRU: health score from a detector that never saw a fault", tag: "Public dataset", group: "cwru" },
   { file: "cwru_confusion.png", caption: "CWRU: fault type, trained on 3 loads and tested on the 4th", tag: "Public dataset", group: "cwru" },
   { file: "cwru_severity_confusion.png", caption: "CWRU: fault type on unseen bearing sizes", tag: "Public dataset", group: "cwru" },
+  { file: "eda_ims.png", caption: "NASA IMS: what the data looks like (RMS, kurtosis, outer-race signal over 7 days)", tag: "Public dataset", group: "ims" },
   { file: "ims_health.png", caption: "NASA IMS: health of 4 bearings over 7 days until bearing 1 failed", tag: "Public dataset", group: "ims" },
+  { file: "eda_ai4i.png", caption: "AI4I 2020: what the data looks like (failure rate, failed vs normal, correlations)", tag: "Public dataset", group: "ai4i" },
+  { file: "ai4i_pr_curve.png", caption: "AI4I 2020: precision-recall vs the no-skill baseline, and how the threshold was chosen", tag: "Public dataset", group: "ai4i" },
   { file: "ai4i_shap.png", caption: "AI4I 2020: what drives each failure prediction (SHAP)", tag: "Public dataset", group: "ai4i" },
-  { file: "ai4i_confusion.png", caption: "AI4I 2020: failure type on the test set", tag: "Public dataset", group: "ai4i" },
+  { file: "ai4i_confusion.png", caption: "AI4I 2020: failure type on the test set (tool-wear failures are random by design: 0 of 8 caught)", tag: "Public dataset", group: "ai4i" },
   { file: "live_confusion.png", caption: "Live classifier on an unseen simulator session", tag: "Simulator", group: "sim" },
   { file: "live_demo_timeline.png", caption: "Live pipeline rehearsal: faults injected one by one", tag: "Simulator", group: "sim" },
   { file: "sim_fft_conditions.png", caption: "Simulator: FFT signature of every condition", tag: "Simulator", group: "sim" },
 ];
+// Said up front, so nobody has to ask (details: docs/design_decisions.md)
+const LIMITATIONS = [
+  ["Live demo = simulated data", "Accuracy claims above come only from public datasets, never from the simulator."],
+  ["No real-hardware data yet", "The ESP32 rig uses the same data format, but the models haven't been retrained on our motor."],
+  ["Time-to-failure is rough", "A straight-line trend of recent health: \"declining fast or slowly\", not a countdown."],
+  ["CWRU is an easy benchmark", "Its classes separate cleanly. NASA IMS (a fault growing over days) is the realistic test."],
+  ["Some failures are random", "AI4I tool-wear failures happen at a random tool age by design: 0 of 8 caught."],
+  ["4 named fault types", "Unbalance, looseness, bearing, overload. Anything else is still flagged, as \"unknown anomaly\"."],
+];
+
 const GROUPS = [["all", "All"], ["cwru", "CWRU"], ["ims", "NASA IMS"], ["ai4i", "AI4I"], ["sim", "Simulator"]];
 
 function Lightbox({ figs, index, onClose, onMove }) {
@@ -91,6 +105,12 @@ export default function BenchmarksPage() {
           </section>
         ))}
       </div>
+      <section className="card limits">
+        <h2>Limitations</h2>
+        <ul>
+          {LIMITATIONS.map(([title, text]) => <li key={title}><strong>{title}.</strong> {text}</li>)}
+        </ul>
+      </section>
       <div className="seg" role="group" aria-label="Dataset" style={{ marginBottom: 12 }}>
         {GROUPS.map(([k, l]) => <button key={k} aria-pressed={group === k} onClick={() => setGroup(k)}>{l}</button>)}
       </div>

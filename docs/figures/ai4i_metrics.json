@@ -1,0 +1,148 @@
+{
+ "split": "60/20/20 train/validation/test, stratified by failure type",
+ "threshold_rule": "maximise F2 on validation, applied once to test",
+ "cost_assumption": {
+  "missed_failure": 10.0,
+  "false_alarm": 1.0
+ },
+ "models": {
+  "Raw sensors only": {
+   "seed": 42,
+   "threshold_f2": 0.43,
+   "threshold_cost": 0.33,
+   "test_prevalence": 0.033,
+   "pr_auc": 0.8107,
+   "roc_auc": 0.9831,
+   "at_f2_threshold": {
+    "tp": 51,
+    "fp": 25,
+    "fn": 15,
+    "tn": 1909,
+    "precision": 0.6711,
+    "recall": 0.7727,
+    "f2": 0.75,
+    "false_alarm_rate": 0.01293
+   },
+   "at_cost_threshold": {
+    "tp": 57,
+    "fp": 40,
+    "fn": 9,
+    "tn": 1894,
+    "precision": 0.5876,
+    "recall": 0.8636,
+    "f2": 0.7895,
+    "false_alarm_rate": 0.02068
+   },
+   "default_argmax_rule": {
+    "tp": 46,
+    "fp": 10,
+    "fn": 20,
+    "tn": 1924,
+    "precision": 0.8214,
+    "recall": 0.697,
+    "f2": 0.7188,
+    "false_alarm_rate": 0.00517
+   },
+   "accuracy_always_no_failure": 0.967,
+   "over_splits": {
+    "n_splits": 6,
+    "pr_auc": {
+     "mean": 0.7886,
+     "sd": 0.0475
+    },
+    "roc_auc": {
+     "mean": 0.982,
+     "sd": 0.0051
+    },
+    "recall_at_f2": {
+     "mean": 0.7778,
+     "sd": 0.0635
+    },
+    "precision_at_f2": {
+     "mean": 0.6483,
+     "sd": 0.0691
+    }
+   }
+  },
+  "Raw + physics features": {
+   "seed": 42,
+   "threshold_f2": 0.62,
+   "threshold_cost": 0.12,
+   "test_prevalence": 0.033,
+   "pr_auc": 0.9326,
+   "roc_auc": 0.9931,
+   "at_f2_threshold": {
+    "tp": 56,
+    "fp": 5,
+    "fn": 10,
+    "tn": 1929,
+    "precision": 0.918,
+    "recall": 0.8485,
+    "f2": 0.8615,
+    "false_alarm_rate": 0.00259
+   },
+   "at_cost_threshold": {
+    "tp": 61,
+    "fp": 54,
+    "fn": 5,
+    "tn": 1880,
+    "precision": 0.5304,
+    "recall": 0.9242,
+    "f2": 0.8047,
+    "false_alarm_rate": 0.02792
+   },
+   "default_argmax_rule": {
+    "tp": 56,
+    "fp": 7,
+    "fn": 10,
+    "tn": 1927,
+    "precision": 0.8889,
+    "recall": 0.8485,
+    "f2": 0.8563,
+    "false_alarm_rate": 0.00362
+   },
+   "accuracy_always_no_failure": 0.967,
+   "over_splits": {
+    "n_splits": 6,
+    "pr_auc": {
+     "mean": 0.923,
+     "sd": 0.0082
+    },
+    "roc_auc": {
+     "mean": 0.9904,
+     "sd": 0.0045
+    },
+    "recall_at_f2": {
+     "mean": 0.8434,
+     "sd": 0.0242
+    },
+    "precision_at_f2": {
+     "mean": 0.9136,
+     "sd": 0.0299
+    }
+   }
+  }
+ },
+ "per_type_test": {
+  "Heat dissipation": {
+   "n": 23,
+   "detected": 1.0,
+   "detected_and_named": 1.0
+  },
+  "Power": {
+   "n": 19,
+   "detected": 0.947,
+   "detected_and_named": 0.947
+  },
+  "Overstrain": {
+   "n": 16,
+   "detected": 0.938,
+   "detected_and_named": 0.938
+  },
+  "Tool wear": {
+   "n": 8,
+   "detected": 0.0,
+   "detected_and_named": 0.0
+  }
+ }
+}

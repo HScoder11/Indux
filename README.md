@@ -6,6 +6,19 @@
 
 All data sources share one JSON-lines format: see [docs/data_contract.md](docs/data_contract.md).
 
+**Why it's built this way** (per-motor baseline, 3-of-5 alert rule, splits, thresholds): [docs/design_decisions.md](docs/design_decisions.md).
+
+## Limitations
+
+Stated up front, details in [docs/design_decisions.md](docs/design_decisions.md#3-limitations-stated-up-front):
+
+- **The live demo runs on simulated data.** Accuracy claims come only from public datasets (CWRU, NASA IMS, AI4I).
+- **No real-hardware data yet.** The ESP32 uses the same data format, but the models haven't been retrained on our motor.
+- **Time-to-failure is a rough straight-line trend**, a "fast or slow decline" indicator rather than a countdown.
+- **CWRU is an easy benchmark** (its classes separate cleanly). NASA IMS, a fault that grows naturally over days, is the realistic test.
+- **AI4I tool-wear failures are random by design:** 0 of 8 were caught.
+- **Only 4 fault types are named** (unbalance, looseness, bearing, overload). Anything else is flagged as "unknown anomaly".
+
 ## Setup
 
 ```bash
@@ -30,13 +43,27 @@ Conditions: `healthy`, `unbalance`, `looseness`, `bearing`, `overload`, `degrade
 
 `ml.features.extract(window, fs, rpm, current=..., temp=..., ...)` returns a flat dict of time-domain, spectral, envelope (bearing) and electrical/thermal features. `fs` is always passed in (sim 3.2 kHz, CWRU 12 kHz, IMS 20.48 kHz). Use `bearing=CWRU_6205_DE` or `IMS_ZA2115` for the benchmark datasets. `StreamFeaturizer` wraps it for live contract records.
 
-## Datasets (not committed)
+## Datasets and benchmarks (data not committed)
 
-| Folder | Source | What to get |
+```bash
+python download_data.py            # AI4I + CWRU + NASA IMS from the official sources (~1.2 GB, mostly IMS)
+python download_data.py --only ai4i cwru     # skip the 1.07 GB IMS archive
+python download_data.py --check    # what's there
+
+python ml/eda.py                   # "what the data looks like": docs/figures/eda_{ai4i,cwru,ims}.png
+python ml/train_ai4i.py            # AI4I: 60/20/20 split, F2 threshold on validation, PR curve, PR-AUC/ROC-AUC
+python ml/train_cwru.py            # CWRU: train on 3 loads, test on the 4th
+python ml/train_ims.py             # NASA IMS: health over 7 days, early-warning time
+```
+
+| Folder | Source | Contents |
 |---|---|---|
-| `data/benchmark/cwru/` | CWRU Bearing Data Center | 12 kHz drive-end: normal, inner race, outer race and ball faults (0.007"), loads 0–3 HP |
-| `data/benchmark/ims/` | NASA IMS bearing dataset | Test 2 (bearing 1 outer-race failure) |
-| `data/benchmark/ai4i/` | UCI AI4I 2020 | `ai4i2020.csv` |
+| `data/benchmark/ai4i/` | UCI Machine Learning Repository | `ai4i2020.csv`, 10,000 rows, 3.4% failures |
+| `data/benchmark/cwru/` | Case Western Reserve University Bearing Data Center | 40 files: 12 kHz drive end, normal + inner/outer/ball faults (0.007", 0.014", 0.021"), loads 0–3 HP |
+| `data/benchmark/ims/` | NASA Prognostics Data Repository | Test 2: 984 snapshots over 7 days, bearing 1 fails (outer race) |
+
+The IMS archive is nested (zip → 7z → rar). `download_data.py` unpacks it with 7-Zip, Windows/macOS `tar`, or
+`py7zr` + `rarfile`, and prints manual steps if none of them can.
 
 ## Backend
 
